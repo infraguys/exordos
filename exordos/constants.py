@@ -102,6 +102,14 @@ PG_INSTANCE_COLLECTION = "/v1/types/postgres/instances/"
 PG_DATABASE_COLLECTION = "/v1/types/postgres/instances/{instance_uuid}/databases/"
 PG_USER_COLLECTION = "/v1/types/postgres/instances/{instance_uuid}/users/"
 
+# Served by the metapaas element itself, not by core.
+METAPAAS_TYPE_COLLECTION = "/v1/types/"
+
+# Served by the mail PaaS plugin, mounted by metapaas under /v1/types/mail/.
+MAIL_VERSION_COLLECTION = "/v1/types/mail/versions/"
+MAIL_INSTANCE_COLLECTION = "/v1/types/mail/instances/"
+MAIL_ACCOUNT_COLLECTION = "/v1/types/mail/instances/{instance_uuid}/accounts/"
+
 AGENT_COLLECTION = "/v1/ua/agents/"
 ACTUAL_RESOURCE_COLLECTION = "/v1/ua/resources/"
 TARGET_RESOURCE_COLLECTION = "/v1/ua/target_resources/"

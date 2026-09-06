@@ -38,6 +38,7 @@ from exordos.cmd.em import em_group
 from exordos.cmd.em.elements import commands as elements_commands
 from exordos.cmd.iam import iam_group
 from exordos.cmd.initialization import commands as initialization_commands
+from exordos.cmd.metapaas import metapaas_group
 from exordos.cmd.network import network_group
 from exordos.cmd.quota import commands as quota_commands
 from exordos.cmd.realms.commands import realms_group
@@ -327,6 +328,7 @@ exordos.add_command(quota_commands.limits_group, aliases=["q"])
 
 exordos.add_command(dns_group)
 exordos.add_command(dbaas_group)
+exordos.add_command(metapaas_group)
 exordos.add_command(network_group)
 
 exordos.add_command(rules_group)
