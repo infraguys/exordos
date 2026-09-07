@@ -172,6 +172,24 @@ def _get_sort_key(
     return (repo_priority, version_obj)
 
 
+def _load_manifest(path: str) -> dict[str, tp.Any] | None:
+    """Load an element manifest, or None if the file is not a manifest.
+
+    A bare element name can collide with a file of the same name in the
+    current directory, so the caller must fall back to name lookup instead
+    of treating any existing file as a manifest.
+    """
+    try:
+        data = utils.load_yaml(path)
+    except Exception:
+        return None
+
+    if isinstance(data, dict) and data.get("name"):
+        return data
+
+    return None
+
+
 def _select_element_by_name(
     client: "CollectionBaseClient",
     name: str,
@@ -351,10 +369,15 @@ def install_cmd(
 
     client = base_client.get_user_api_client(ctx.obj.auth_data)
 
-    if os.path.isfile(uuid_or_name_or_path):
+    manifest_data = (
+        _load_manifest(uuid_or_name_or_path)
+        if os.path.isfile(uuid_or_name_or_path)
+        else None
+    )
+
+    if manifest_data:
         manifest_path = pathlib.Path(uuid_or_name_or_path)
-        manifest_data = utils.load_yaml(str(manifest_path))
-        name = manifest_data.get("name")
+        name = manifest_data["name"]
         e_version = manifest_data.get("version")
 
         driver_spec = {"kind": "database"}
@@ -454,10 +477,15 @@ def update_cmd(
 
     client = base_client.get_user_api_client(ctx.obj.auth_data)
 
-    if os.path.isfile(uuid_or_name_or_path):
+    manifest_data = (
+        _load_manifest(uuid_or_name_or_path)
+        if os.path.isfile(uuid_or_name_or_path)
+        else None
+    )
+
+    if manifest_data:
         manifest_path = pathlib.Path(uuid_or_name_or_path)
-        manifest_data = utils.load_yaml(str(manifest_path))
-        name = manifest_data.get("name")
+        name = manifest_data["name"]
         e_version = manifest_data.get("version")
 
         current_element = _select_current_element_by_name(client, name)
