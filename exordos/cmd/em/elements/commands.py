@@ -144,10 +144,37 @@ def show_element_ips(ctx: click.Context, name: str) -> None:
         click.echo(node["default_network"].get("ipv4", None))
 
 
+def _get_repo_uuid(element: dict[str, tp.Any]) -> str | None:
+    """Extract the repository UUID from an element repository reference.
+
+    Args:
+        element: Element dictionary containing a repository reference.
+
+    Returns:
+        Repository UUID, or None if the reference is missing or malformed.
+    """
+    repository_ref = element.get("repository")
+    if not repository_ref:
+        return None
+
+    try:
+        repo_uuid = repository_ref.rstrip("/").split("/")[-1]
+        if utils.is_valid_uuid(repo_uuid):
+            return repo_uuid
+    except Exception:
+        pass
+
+    return None
+
+
 def _get_sort_key(
     element: dict[str, tp.Any], repo_priorities: dict[str, int]
 ) -> tuple[int, packaging_version.Version]:
     """Get sort key for element: (repository_priority, version).
+
+    Repository priority comes first, so an element served by a higher priority
+    repository always wins; the version only breaks ties between repositories
+    sharing the same priority.
 
     Args:
         element: Element dictionary containing version and repository reference.
@@ -157,19 +184,10 @@ def _get_sort_key(
         Tuple of (repository_priority, version) for sorting.
         Higher values indicate higher priority.
     """
-    version_obj = packaging_version.parse(element["version"])
+    repo_uuid = _get_repo_uuid(element)
+    repo_priority = repo_priorities.get(repo_uuid, 0) if repo_uuid else 0
 
-    repo_priority = 0
-    repository_ref = element.get("repository")
-    if repository_ref:
-        try:
-            repo_uuid = repository_ref.rstrip("/").split("/")[-1]
-            if utils.is_valid_uuid(repo_uuid):
-                repo_priority = repo_priorities.get(repo_uuid, 0)
-        except Exception:
-            pass
-
-    return (repo_priority, version_obj)
+    return (repo_priority, packaging_version.parse(element["version"]))
 
 
 def _select_element_by_name(
@@ -177,25 +195,35 @@ def _select_element_by_name(
     name: str,
     version_filter: str | None,
     exclude_uuid: str | None = None,
-) -> dict[str, tp.Any]:
+    newer_than: str | None = None,
+    auto_select: bool = False,
+) -> dict[str, tp.Any] | None:
     """Select the best element by name, sorting by (repository_priority, version).
 
-    Filters out development versions unless version_filter is specified.
-    Sorts elements by repository priority (higher is better) and version
-    (higher is better), then returns the highest priority element.
+    Collects the element from every repository and filters out development
+    versions unless version_filter is specified. When the remaining candidates
+    carry more than one version, the user is asked which version to take;
+    otherwise the candidate from the highest priority repository is returned.
 
     Args:
         client: API client for making requests.
         name: Element name to search for.
         version_filter: Optional version string to filter by.
             If None, only stable versions are considered.
+        exclude_uuid: Optional element UUID to drop from the candidates.
+        newer_than: Optional version, keeps only strictly newer candidates.
+        auto_select: Take the best candidate instead of asking the user.
 
     Returns:
-        Dictionary representing the selected element.
+        Dictionary representing the selected element, or None if newer_than
+        filtered out every candidate.
 
     Raises:
         click.ClickException: If no elements found or no stable versions available.
+        click.Abort: If the user cancels the version selection.
     """
+    import questionary
+
     elements = base_client.list_entities(
         client, c.REPOSITORY_ELEMENT_COLLECTION, name=name
     )
@@ -206,12 +234,14 @@ def _select_element_by_name(
     if not elements:
         raise click.ClickException(f"No elements found with name '{name}'")
 
-    # Fetch all repositories once to build priority cache
+    # Fetch all repositories once to build priority and name caches
     repo_priorities: dict[str, int] = {}
+    repo_names: dict[str, str] = {}
     try:
         repositories = base_client.list_entities(client, c.REPOSITORY_COLLECTION)
         for repo in repositories:
             repo_priorities[repo["uuid"]] = repo.get("priority", 0)
+            repo_names[repo["uuid"]] = repo.get("name", repo["uuid"])
     except Exception:
         pass
 
@@ -233,10 +263,47 @@ def _select_element_by_name(
                 f"No elements found with name '{name}' and version '{version_filter}'"
             )
 
+    if newer_than is not None:
+        installed = packaging_version.parse(newer_than)
+        elements = [
+            e for e in elements if packaging_version.parse(e["version"]) > installed
+        ]
+        if not elements:
+            return None
+
     # Sort by (repository_priority, version) - higher is better
     elements.sort(key=lambda e: _get_sort_key(e, repo_priorities), reverse=True)
 
-    return elements[0]
+    # Keep one candidate per version: the first occurrence comes from the
+    # highest priority repository offering that version.
+    by_version: dict[str, dict[str, tp.Any]] = {}
+    for element in elements:
+        by_version.setdefault(element["version"], element)
+
+    if auto_select or len(by_version) == 1:
+        return elements[0]
+
+    candidates = sorted(
+        by_version.values(),
+        key=lambda e: packaging_version.parse(e["version"]),
+        reverse=True,
+    )
+    choices = [
+        questionary.Choice(
+            f"{e['version']} "
+            f"(repo: {repo_names.get(_get_repo_uuid(e) or '', 'unknown')})",
+            value=e,
+        )
+        for e in candidates
+    ]
+    selected = questionary.select(
+        f"Several versions of element '{name}' are available, select one",
+        choices=choices,
+    ).ask()
+    if selected is None:
+        raise click.Abort()
+
+    return selected
 
 
 def _select_current_element_by_name(
@@ -511,9 +578,23 @@ def update_cmd(
     else:
         current_element = _select_current_element_by_name(client, uuid_or_name_or_path)
 
+    # Without an explicit --version only strictly newer candidates are
+    # considered, so an update is never turned into a downgrade.
     target_element = _select_element_by_name(
-        client, current_element["name"], version, exclude_uuid=current_element["uuid"]
+        client,
+        current_element["name"],
+        version,
+        exclude_uuid=current_element["uuid"],
+        newer_than=None if version else current_element["version"],
+        auto_select=y,
     )
+
+    if target_element is None:
+        click.echo(
+            f"Element {current_element['name']} ({current_element['version']}) "
+            "is already up to date"
+        )
+        return
 
     if not (
         y

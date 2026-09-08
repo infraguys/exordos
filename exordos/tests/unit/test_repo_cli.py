@@ -200,6 +200,15 @@ class TestGetSortKey:
         priority, _ = em_elements._get_sort_key(element, {})
         assert priority == 0
 
+    def test_priority_outranks_version(self) -> None:
+        u = "12345678-1234-1234-1234-123456789abc"
+        newer = {"version": "0.0.35", "repository": ""}
+        older = {"version": "0.0.6", "repository": f"/v1/repo/repositories/{u}"}
+        repo_priorities = {u: 4096}
+        assert em_elements._get_sort_key(
+            older, repo_priorities
+        ) > em_elements._get_sort_key(newer, repo_priorities)
+
 
 class TestSelectElementByName:
     """Tests for exordos.cmd.em.elements.commands._select_element_by_name."""
@@ -227,15 +236,83 @@ class TestSelectElementByName:
         with pytest.raises(click.ClickException, match="No stable versions"):
             em_elements._select_element_by_name(client, "foo", None)
 
-    def test_selects_highest_version(self) -> None:
+    def _patch_select(self, chosen):
+        select_mock = MagicMock()
+        select_mock.return_value.ask.return_value = chosen
+        return patch("questionary.select", select_mock), select_mock
+
+    def test_asks_user_when_several_versions_available(self) -> None:
         elements = [
             {"name": "foo", "version": "1.0.0", "uuid": "u1", "repository": ""},
             {"name": "foo", "version": "2.0.0", "uuid": "u2", "repository": ""},
             {"name": "foo", "version": "1.5.0", "uuid": "u3", "repository": ""},
         ]
         client = self._client(elements)
-        selected = em_elements._select_element_by_name(client, "foo", None)
+        patcher, select_mock = self._patch_select(elements[2])
+        with patcher:
+            selected = em_elements._select_element_by_name(client, "foo", None)
+        assert selected["uuid"] == "u3"
+        offered = [c.value["version"] for c in select_mock.call_args.kwargs["choices"]]
+        assert offered == ["2.0.0", "1.5.0", "1.0.0"]
+
+    def test_aborts_when_version_selection_is_cancelled(self) -> None:
+        elements = [
+            {"name": "foo", "version": "1.0.0", "uuid": "u1", "repository": ""},
+            {"name": "foo", "version": "2.0.0", "uuid": "u2", "repository": ""},
+        ]
+        client = self._client(elements)
+        patcher, _ = self._patch_select(None)
+        with patcher, pytest.raises(click.Abort):
+            em_elements._select_element_by_name(client, "foo", None)
+
+    def test_auto_select_takes_highest_priority_repo(self) -> None:
+        u_low = "11111111-1111-1111-1111-111111111111"
+        u_high = "22222222-2222-2222-2222-222222222222"
+        elements = [
+            {
+                "name": "foo",
+                "version": "2.0.0",
+                "uuid": "u1",
+                "repository": f"/v1/repo/repositories/{u_low}",
+            },
+            {
+                "name": "foo",
+                "version": "1.0.0",
+                "uuid": "u2",
+                "repository": f"/v1/repo/repositories/{u_high}",
+            },
+        ]
+        repositories = [
+            {"uuid": u_low, "priority": 10},
+            {"uuid": u_high, "priority": 4096},
+        ]
+        client = self._client(elements, repositories)
+        selected = em_elements._select_element_by_name(
+            client, "foo", None, auto_select=True
+        )
         assert selected["uuid"] == "u2"
+
+    def test_newer_than_drops_older_candidates(self) -> None:
+        elements = [
+            {"name": "foo", "version": "1.0.0", "uuid": "u1", "repository": ""},
+            {"name": "foo", "version": "2.0.0", "uuid": "u2", "repository": ""},
+        ]
+        client = self._client(elements)
+        selected = em_elements._select_element_by_name(
+            client, "foo", None, newer_than="1.0.0"
+        )
+        assert selected["uuid"] == "u2"
+
+    def test_newer_than_returns_none_without_candidates(self) -> None:
+        elements = [
+            {"name": "foo", "version": "1.0.0", "uuid": "u1", "repository": ""},
+            {"name": "foo", "version": "2.0.0", "uuid": "u2", "repository": ""},
+        ]
+        client = self._client(elements)
+        assert (
+            em_elements._select_element_by_name(client, "foo", None, newer_than="2.0.0")
+            is None
+        )
 
     def test_selects_higher_priority_repo(self) -> None:
         u_low = "11111111-1111-1111-1111-111111111111"
@@ -261,6 +338,35 @@ class TestSelectElementByName:
         client = self._client(elements, repositories)
         selected = em_elements._select_element_by_name(client, "foo", None)
         assert selected["uuid"] == "u2"
+
+    def test_asks_user_about_newer_version_in_lower_priority_repo(self) -> None:
+        u_low = "11111111-1111-1111-1111-111111111111"
+        u_high = "22222222-2222-2222-2222-222222222222"
+        elements = [
+            {
+                "name": "foo",
+                "version": "0.0.35",
+                "uuid": "u1",
+                "repository": f"/v1/repo/repositories/{u_low}",
+            },
+            {
+                "name": "foo",
+                "version": "0.0.6",
+                "uuid": "u2",
+                "repository": f"/v1/repo/repositories/{u_high}",
+            },
+        ]
+        repositories = [
+            {"uuid": u_low, "priority": 10, "name": "extra"},
+            {"uuid": u_high, "priority": 4096, "name": "main"},
+        ]
+        client = self._client(elements, repositories)
+        patcher, select_mock = self._patch_select(elements[0])
+        with patcher:
+            selected = em_elements._select_element_by_name(client, "foo", None)
+        assert selected["uuid"] == "u1"
+        titles = [c.title for c in select_mock.call_args.kwargs["choices"]]
+        assert titles == ["0.0.35 (repo: extra)", "0.0.6 (repo: main)"]
 
     def test_version_filter_exact_match(self) -> None:
         elements = [
@@ -460,3 +566,73 @@ class TestPushCmd:
             repo_commands.push_cmd, ["-j", "0"], obj=self._obj()
         )
         assert result.exit_code != 0
+
+
+class TestUpdateCmd:
+    """Tests for exordos.cmd.em.elements.commands.update_cmd."""
+
+    def _obj(self) -> ContextObject:
+        return ContextObject(
+            auth_data={},
+            cfg_path=None,
+            developer_key_path=None,
+            cfg={},
+            need_update=None,
+        )
+
+    def _invoke(self, args: list[str], current: dict, target: dict):
+        with (
+            patch.object(em_elements.base_client, "get_user_api_client"),
+            patch.object(
+                em_elements,
+                "_select_current_element_by_name",
+                return_value=current,
+            ),
+            patch.object(em_elements, "_select_element_by_name", return_value=target),
+            patch.object(em_elements.base_client, "action_entity") as action_mock,
+        ):
+            result = CliRunner().invoke(em_elements.update_cmd, args, obj=self._obj())
+        assert result.exit_code == 0, result.output
+        return result, action_mock
+
+    def test_update_cmd_without_newer_candidate_is_not_proposed(self) -> None:
+        # Only strictly newer candidates are considered, so the selection
+        # returns nothing when the installed element is the newest one.
+        current = {"name": "foo", "version": "0.0.34", "uuid": "u_cur"}
+        result, action_mock = self._invoke(["foo"], current, None)
+        assert "already up to date" in result.output
+        action_mock.assert_not_called()
+
+    def test_update_cmd_limits_candidates_to_newer_versions(self) -> None:
+        current = {"name": "foo", "version": "0.0.33", "uuid": "u_cur"}
+        target = {"name": "foo", "version": "0.0.34", "uuid": "u_new"}
+        with (
+            patch.object(em_elements.base_client, "get_user_api_client"),
+            patch.object(
+                em_elements,
+                "_select_current_element_by_name",
+                return_value=current,
+            ),
+            patch.object(
+                em_elements, "_select_element_by_name", return_value=target
+            ) as select_mock,
+            patch.object(em_elements.base_client, "action_entity"),
+        ):
+            result = CliRunner().invoke(
+                em_elements.update_cmd, ["-y", "foo"], obj=self._obj()
+            )
+        assert result.exit_code == 0, result.output
+        assert select_mock.call_args.kwargs["newer_than"] == "0.0.33"
+        assert select_mock.call_args.kwargs["auto_select"] is True
+
+    def test_update_cmd_newer_candidate_upgrades(self) -> None:
+        current = {"name": "foo", "version": "0.0.33", "uuid": "u_cur"}
+        target = {"name": "foo", "version": "0.0.34", "uuid": "u_new"}
+        _, action_mock = self._invoke(["-y", "foo"], current, target)
+        assert action_mock.call_args.kwargs["target"] == "u_new"
+
+    def test_update_cmd_explicit_version_allows_downgrade(self) -> None:
+        current = {"name": "foo", "version": "0.0.34", "uuid": "u_cur"}
+        target = {"name": "foo", "version": "0.0.33", "uuid": "u_old"}
+        _, action_mock = self._invoke(["-y", "-v", "0.0.33", "foo"], current, target)
+        assert action_mock.call_args.kwargs["target"] == "u_old"
