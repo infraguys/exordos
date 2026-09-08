@@ -1,13 +1,13 @@
 
 # exordos_ee_update
 
-Update element
+Update one or more elements
 
 ## Usage
 
 ```console
                                                                                                                                                                                                                                                                                                            
- Usage: exordos ee update [OPTIONS] [UUID_OR_NAME_OR_PATH]                                                                                                                                                                                                                                                 
+ Usage: exordos ee update [OPTIONS] [UUID_OR_NAME_OR_PATH]...                                                                                                                                                                                                                                              
                                                                                                                                                                                                                                                                                                            
 ```
 
@@ -60,9 +60,9 @@ Update element
 
 ```console
                                                                                                                                                                                                                                                                                                            
- Usage: exordos ee update [OPTIONS] [UUID_OR_NAME_OR_PATH]                                                                                                                                                                                                                                                 
+ Usage: exordos ee update [OPTIONS] [UUID_OR_NAME_OR_PATH]...                                                                                                                                                                                                                                              
                                                                                                                                                                                                                                                                                                            
- Update element                                                                                                                                                                                                                                                                                            
+ Update one or more elements                                                                                                                                                                                                                                                                               
                                                                                                                                                                                                                                                                                                            
 ╭─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version     -v  TEXT   version of the element                                                                                                                                                                                                                                                         │

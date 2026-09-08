@@ -400,116 +400,77 @@ def install_cmd(
     )
 
 
-@click.command("update", help="Update element")
-@click.option(
-    "-v",
-    "--version",
-    type=str,
-    required=False,
-    help="version of the element",
-)
-@click.option(
-    "--yes", "-y", "y", help="Automatically answer yes for all questions", is_flag=True
-)
-@click.option(
-    "-p",
-    "--project-id",
-    type=click.UUID,
-    default=sys_uuid.UUID(int=0),
-    help="Project UUID, required only if the upload repository doesn't exist yet",
-)
-@click.option(
-    "--timeout",
-    type=float,
-    default=DEFAULT_TIMEOUT,
-    show_default=True,
-    help="Seconds to wait for repository upload and element sync to complete",
-)
-@click.argument("uuid_or_name_or_path", required=False)
-@click.pass_context
-def update_cmd(
-    ctx: click.Context,
-    version: str | None,
+def _update_element_from_manifest(
+    client: "CollectionBaseClient",
+    manifest_path: pathlib.Path,
     y: bool,
     project_id: sys_uuid.UUID,
     timeout: float,
-    uuid_or_name_or_path: str | None,
 ) -> None:
-    """Update element from repository API by UUID, name, or manifest path"""
+    """Update a single element from a local manifest file."""
     import questionary
 
-    if not uuid_or_name_or_path:
-        all_elements = base_client.list_entities(
-            base_client.get_user_api_client(ctx.obj.auth_data),
-            c.REPOSITORY_ELEMENT_COLLECTION,
-        )
-        element_names = sorted(set(e["name"] for e in all_elements))
-        uuid_or_name_or_path = questionary.select(
-            "Select element to update",
-            choices=element_names,
+    manifest_data = utils.load_yaml(str(manifest_path))
+    name = manifest_data.get("name")
+    e_version = manifest_data.get("version")
+
+    current_element = _select_current_element_by_name(client, name)
+
+    if not (
+        y
+        or questionary.confirm(
+            f"Update {current_element['name']} "
+            f"({current_element['version']} -> {e_version})?"
         ).ask()
-        if not uuid_or_name_or_path:
-            click.echo("No element selected, aborting")
-            return
-
-    client = base_client.get_user_api_client(ctx.obj.auth_data)
-
-    if os.path.isfile(uuid_or_name_or_path):
-        manifest_path = pathlib.Path(uuid_or_name_or_path)
-        manifest_data = utils.load_yaml(str(manifest_path))
-        name = manifest_data.get("name")
-        e_version = manifest_data.get("version")
-
-        current_element = _select_current_element_by_name(client, name)
-
-        if not (
-            y
-            or questionary.confirm(
-                f"Update {current_element['name']} "
-                f"({current_element['version']} -> {e_version})?"
-            ).ask()
-        ):
-            return
-
-        driver_spec = {"kind": "database"}
-        repository = repo_utils.ensure_repository(
-            client,
-            DEFAULT_UPLOAD_REPO_NAME,
-            driver_spec,
-            project_id,
-            DEFAULT_PRIORITY,
-            sync_mode="copy",
-        )
-
-        repo_utils.do_upload(client, DEFAULT_UPLOAD_REPO_NAME, manifest_path)
-
-        click.echo(f"Waiting for {name} ({e_version}) to become AVAILABLE...")
-        target_element = repo_utils.wait_for_repo_element(
-            client, repository["uuid"], name, e_version, "AVAILABLE", timeout
-        )
-
-        base_client.action_entity(
-            client,
-            c.REPOSITORY_ELEMENT_COLLECTION,
-            "upgrade",
-            current_element["uuid"],
-            target=target_element["uuid"],
-        )
-
-        installed_name = (
-            f"{current_element['name']} ({current_element['version']} -> {e_version})"
-        )
-        click.echo(
-            f"Element {click.style(installed_name, fg='green')} was updated successfully"
-        )
+    ):
         return
 
-    if utils.is_valid_uuid(uuid_or_name_or_path):
-        current_element = client.get(
-            c.REPOSITORY_ELEMENT_COLLECTION, uuid=uuid_or_name_or_path
-        )
+    driver_spec = {"kind": "database"}
+    repository = repo_utils.ensure_repository(
+        client,
+        DEFAULT_UPLOAD_REPO_NAME,
+        driver_spec,
+        project_id,
+        DEFAULT_PRIORITY,
+        sync_mode="copy",
+    )
+
+    repo_utils.do_upload(client, DEFAULT_UPLOAD_REPO_NAME, manifest_path)
+
+    click.echo(f"Waiting for {name} ({e_version}) to become AVAILABLE...")
+    target_element = repo_utils.wait_for_repo_element(
+        client, repository["uuid"], name, e_version, "AVAILABLE", timeout
+    )
+
+    base_client.action_entity(
+        client,
+        c.REPOSITORY_ELEMENT_COLLECTION,
+        "upgrade",
+        current_element["uuid"],
+        target=target_element["uuid"],
+    )
+
+    installed_name = (
+        f"{current_element['name']} ({current_element['version']} -> {e_version})"
+    )
+    click.echo(
+        f"Element {click.style(installed_name, fg='green')} was updated successfully"
+    )
+
+
+def _update_element_by_uuid_or_name(
+    client: "CollectionBaseClient",
+    uuid_or_name: str,
+    version: str | None,
+    y: bool,
+) -> None:
+    """Update a single element selected by UUID or name."""
+    import questionary
+
+    if utils.is_valid_uuid(uuid_or_name):
+        current_element = client.get(c.REPOSITORY_ELEMENT_COLLECTION, uuid=uuid_or_name)
     else:
-        current_element = _select_current_element_by_name(client, uuid_or_name_or_path)
+        current_element = _select_current_element_by_name(client, uuid_or_name)
 
     target_element = _select_element_by_name(
         client, current_element["name"], version, exclude_uuid=current_element["uuid"]
@@ -539,6 +500,70 @@ def update_cmd(
     click.echo(
         f"Element {click.style(installed_name, fg='green')} was updated successfully"
     )
+
+
+@click.command("update", help="Update one or more elements")
+@click.option(
+    "-v",
+    "--version",
+    type=str,
+    required=False,
+    help="version of the element",
+)
+@click.option(
+    "--yes", "-y", "y", help="Automatically answer yes for all questions", is_flag=True
+)
+@click.option(
+    "-p",
+    "--project-id",
+    type=click.UUID,
+    default=sys_uuid.UUID(int=0),
+    help="Project UUID, required only if the upload repository doesn't exist yet",
+)
+@click.option(
+    "--timeout",
+    type=float,
+    default=DEFAULT_TIMEOUT,
+    show_default=True,
+    help="Seconds to wait for repository upload and element sync to complete",
+)
+@click.argument("uuid_or_name_or_path", nargs=-1)
+@click.pass_context
+def update_cmd(
+    ctx: click.Context,
+    version: str | None,
+    y: bool,
+    project_id: sys_uuid.UUID,
+    timeout: float,
+    uuid_or_name_or_path: tuple[str, ...],
+) -> None:
+    """Update elements from repository API by UUID, name, or manifest path"""
+    import questionary
+
+    client = base_client.get_user_api_client(ctx.obj.auth_data)
+
+    targets = list(uuid_or_name_or_path)
+    if not targets:
+        all_elements = base_client.list_entities(
+            client,
+            c.REPOSITORY_ELEMENT_COLLECTION,
+        )
+        element_names = sorted(set(e["name"] for e in all_elements))
+        targets = questionary.checkbox(
+            "Select elements to update",
+            choices=element_names,
+        ).ask()
+        if not targets:
+            click.echo("No element selected, aborting")
+            return
+
+    for target in targets:
+        if os.path.isfile(target):
+            _update_element_from_manifest(
+                client, pathlib.Path(target), y, project_id, timeout
+            )
+        else:
+            _update_element_by_uuid_or_name(client, target, version, y)
 
 
 @click.command("uninstall", help="Uninstall elements by UUID or name")
