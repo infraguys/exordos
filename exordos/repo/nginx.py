@@ -20,6 +20,7 @@ import concurrent.futures as futures
 import json
 import os
 import pathlib
+import time
 
 from packaging import version
 import requests
@@ -229,6 +230,7 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         workers: int = 1,
     ) -> None:
         """Push the element to the repo."""
+        start = time.monotonic()
         element_url = f"{self.elements_path}/{element.name}/{element.version}"
 
         # Check if element already exists
@@ -260,9 +262,13 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         )
         response.raise_for_status()
 
-        self._logger.info(f"Pushed {element.name} version {element.version}")
+        self._logger.info(
+            f"Pushed {element.name} version {element.version} "
+            f"in {time.monotonic() - start:.1f}s"
+        )
 
         if latest and not version.parse(element.version).is_prerelease:
+            latest_start = time.monotonic()
             element_url_latest = f"{self.elements_path}/{element.name}/latest"
 
             self._upload_artifacts(
@@ -279,7 +285,10 @@ class NginxRepoDriver(base.AbstractRepoDriver):
             )
             response.raise_for_status()
 
-            self._logger.info(f"Pushed {element.name} version latest")
+            self._logger.info(
+                f"Pushed {element.name} version latest "
+                f"in {time.monotonic() - latest_start:.1f}s"
+            )
 
     def pull(self, element: builder_base.ElementInventory, dst_path: str) -> None:
         """Pull the element from the repo."""
