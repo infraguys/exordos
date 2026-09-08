@@ -13,6 +13,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+import pathlib
 from unittest.mock import MagicMock
 from unittest.mock import patch
 import uuid as sys_uuid
@@ -420,6 +421,74 @@ class TestSelectCurrentElementByName:
         )
         with pytest.raises(click.ClickException, match="Multiple installed"):
             em_elements._select_current_element_by_name(client, "foo")
+
+
+class TestLoadManifest:
+    """Tests for exordos.cmd.em.elements.commands._load_manifest."""
+
+    def test_load_manifest_returns_mapping(self, tmp_path) -> None:
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text("name: foo\nversion: 1.0.0\n")
+        assert em_elements._load_manifest(str(manifest)) == {
+            "name": "foo",
+            "version": "1.0.0",
+        }
+
+    def test_load_manifest_empty_file(self, tmp_path) -> None:
+        manifest = tmp_path / "foo"
+        manifest.write_text("")
+        assert em_elements._load_manifest(str(manifest)) is None
+
+    def test_load_manifest_without_name(self, tmp_path) -> None:
+        manifest = tmp_path / "foo"
+        manifest.write_text("version: 1.0.0\n")
+        assert em_elements._load_manifest(str(manifest)) is None
+
+    def test_load_manifest_not_yaml(self, tmp_path) -> None:
+        manifest = tmp_path / "foo"
+        manifest.write_bytes(b"\x00\x01\x02not: [yaml")
+        assert em_elements._load_manifest(str(manifest)) is None
+
+
+class TestUpdateCmd:
+    """Tests for exordos.cmd.em.elements.commands.update_cmd."""
+
+    def _obj(self) -> ContextObject:
+        return ContextObject(
+            auth_data={},
+            cfg_path=None,
+            developer_key_path=None,
+            cfg={},
+            need_update=None,
+        )
+
+    def test_update_cmd_name_colliding_with_local_file(self) -> None:
+        # A file named like the element must not be taken for a manifest.
+        current = {"name": "foo", "version": "1.0.0", "uuid": "u_cur"}
+        target = {"name": "foo", "version": "1.2.3", "uuid": "u_new"}
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            pathlib.Path("foo").write_text("")
+            with (
+                patch.object(em_elements.base_client, "get_user_api_client"),
+                patch.object(
+                    em_elements,
+                    "_select_current_element_by_name",
+                    return_value=current,
+                ),
+                patch.object(
+                    em_elements, "_select_element_by_name", return_value=target
+                ),
+                patch.object(em_elements.base_client, "action_entity") as action_mock,
+            ):
+                result = runner.invoke(
+                    em_elements.update_cmd,
+                    ["foo", "-v", "1.2.3", "-y"],
+                    obj=self._obj(),
+                )
+        assert result.exit_code == 0, result.output
+        assert action_mock.call_args.args[2] == "upgrade"
+        assert action_mock.call_args.kwargs["target"] == "u_new"
 
 
 class TestPushCmd:
