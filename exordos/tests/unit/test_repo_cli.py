@@ -13,6 +13,8 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+import json
+import pathlib
 from unittest.mock import MagicMock
 from unittest.mock import patch
 import uuid as sys_uuid
@@ -21,11 +23,14 @@ import click
 from click.testing import CliRunner
 import pytest
 
+from exordos import constants as c
 from exordos import utils
+from exordos.builder import base as builder_base
 from exordos.cmd.em.elements import commands as em_elements
 from exordos.cmd.repo import commands as repo_commands
 from exordos.cmd.repo.elements import commands as repo_elements
 from exordos.common.cmd_context import ContextObject
+from exordos.repo import utils as repo_utils
 
 
 class TestUrn:
@@ -460,3 +465,40 @@ class TestPushCmd:
             repo_commands.push_cmd, ["-j", "0"], obj=self._obj()
         )
         assert result.exit_code != 0
+
+
+class TestDoPush:
+    """Tests for exordos.repo.utils.do_push."""
+
+    def _element_dir(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        inventory = builder_base.ElementInventory(name="elem", version="1.0.0")
+        elements_dir = tmp_path / c.ELEMENT_REPO_PATH
+        elements_dir.mkdir(parents=True)
+        (elements_dir / "inventory.json").write_text(
+            json.dumps({"elements": {"elem": {"1.0.0": inventory.to_dict()}}})
+        )
+        return tmp_path
+
+    def test_do_push_prints_pushed_element_without_tty(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        driver = MagicMock()
+        driver.name = "exordos_repo"
+
+        repo_utils.do_push(driver, self._element_dir(tmp_path), False, False)
+
+        assert "Push elem to exordos_repo..." in capsys.readouterr().out
+        driver.push.assert_called_once()
+
+    def test_do_push_uses_spinner_on_tty(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        driver = MagicMock()
+        driver.name = "exordos_repo"
+
+        with patch.object(repo_utils.sys.stdout, "isatty", return_value=True):
+            repo_utils.do_push(driver, self._element_dir(tmp_path), False, False)
+
+        # The spinner owns the output, nothing is echoed as a plain line.
+        assert "Push elem to exordos_repo..." not in capsys.readouterr().out
+        driver.push.assert_called_once()
