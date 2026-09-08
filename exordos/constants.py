@@ -104,6 +104,17 @@ PG_USER_COLLECTION = "/v1/types/postgres/instances/{instance_uuid}/users/"
 
 # Served by the metapaas element itself, not by core.
 METAPAAS_TYPE_COLLECTION = "/v1/types/"
+S3_VERSION_COLLECTION = "/v1/types/s3/versions/"
+S3_INSTANCE_COLLECTION = "/v1/types/s3/instances/"
+S3_BUCKET_COLLECTION = "/v1/types/s3/instances/{instance_uuid}/buckets/"
+S3_POLICY_COLLECTION = "/v1/types/s3/instances/{instance_uuid}/policies/"
+S3_USER_COLLECTION = "/v1/types/s3/instances/{instance_uuid}/users/"
+S3_ACCESS_KEY_COLLECTION = (
+    "/v1/types/s3/instances/{instance_uuid}/users/{user_uuid}/keys/"
+)
+S3_USER_POLICY_COLLECTION = (
+    "/v1/types/s3/instances/{instance_uuid}/users/{user_uuid}/policies/"
+)
 
 # Served by the mail PaaS plugin, mounted by metapaas under /v1/types/mail/.
 MAIL_VERSION_COLLECTION = "/v1/types/mail/versions/"

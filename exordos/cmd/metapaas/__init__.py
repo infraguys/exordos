@@ -22,6 +22,7 @@ import rich_click as click
 from exordos import utils
 from exordos.cmd.aliases import ClickAliasedGroup
 from exordos.cmd.metapaas.mail import mail_group
+from exordos.cmd.metapaas.s3 import s3_group
 from exordos.cmd.metapaas.types import commands as types_commands
 
 METAPAAS_URL_PART = "/api/metapaas"
@@ -51,3 +52,4 @@ def metapaas_group(ctx: click.Context, metapaas_endpoint: str | None) -> None:
 
 metapaas_group.add_command(types_commands.types_group, aliases=["t"])
 metapaas_group.add_command(mail_group, aliases=["m"])
+metapaas_group.add_command(s3_group)
