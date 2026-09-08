@@ -585,6 +585,16 @@ def _bootstrap_core(
         infra.delete_stand(stand)
         logger.info(f"Destroyed old Exordos installation: {dev_stand.name}")
 
+    # list_stands discovers stands via their domains, so a network left
+    # behind without a domain (e.g. a previous bootstrap interrupted
+    # before the domain was created, or a domain removed manually
+    # without its networks) isn't visible there. Without this, --force
+    # wouldn't clean it and create_stand would raise
+    # "Network ... already exists". delete_stand is idempotent and only
+    # touches networks named after this stand.
+    if force:
+        infra.delete_stand(dev_stand)
+
     # Prepare IAM settings
     iam = _iam_default_client_settings()
     iam["admin_password"] = admin_password
