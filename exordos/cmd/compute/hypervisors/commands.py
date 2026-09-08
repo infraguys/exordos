@@ -353,6 +353,7 @@ def _install_packages(add_sudo: bool = False) -> None:
         "genisoimage",
         "unzip",
         "python3-venv",
+        "libev-dev",
     ]
     cmd = ["apt-get", "update"]
     run_command(cmd, sudo=add_sudo)
