@@ -86,7 +86,7 @@ source "qemu" "exordos-custom" {
 set -ex
 
 # Logs
-sudo rm -fr /var/log/*
+sudo find /var/log -type f -delete
 
 # Remove temporary keys
 # Disable removing host keys temporarily
