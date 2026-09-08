@@ -473,5 +473,33 @@ def confirm_email(
     click.echo(f"Email {'force' if force else ''} confirmed for {ENTITY} {user}")
 
 
+@users_group.command(
+    "resend_email_confirmation", help=f"Resend email confirmation for the {ENTITY}"
+)
+@click.pass_context
+@click.argument(
+    "user",
+    type=click.UUID,
+    required=True,
+    help=f"{ENTITY} UUID",
+)
+def resend_email_confirmation(
+    ctx: click.Context,
+    user: sys_uuid.UUID,
+) -> None:
+    client = base_client.get_user_api_client(ctx.obj.auth_data)
+
+    data = {}
+
+    base_client.action_entity(
+        client,
+        ENTITY_COLLECTION,
+        "resend_email_confirmation",
+        user,
+        **data,
+    )
+    click.echo(f"Email confirmation resent for {ENTITY} {user}")
+
+
 users_group.add_command(add_cmd, aliases=["a"])
 users_group.add_command(update_cmd, aliases=["u"])
