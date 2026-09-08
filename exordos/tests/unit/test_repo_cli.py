@@ -242,12 +242,33 @@ class TestSelectElementByName:
         return patch("questionary.select", select_mock), select_mock
 
     def test_asks_user_when_several_versions_available(self) -> None:
+        u_low = "11111111-1111-1111-1111-111111111111"
+        u_high = "22222222-2222-2222-2222-222222222222"
         elements = [
-            {"name": "foo", "version": "1.0.0", "uuid": "u1", "repository": ""},
-            {"name": "foo", "version": "2.0.0", "uuid": "u2", "repository": ""},
-            {"name": "foo", "version": "1.5.0", "uuid": "u3", "repository": ""},
+            {
+                "name": "foo",
+                "version": "1.0.0",
+                "uuid": "u1",
+                "repository": f"/v1/repo/repositories/{u_low}",
+            },
+            {
+                "name": "foo",
+                "version": "2.0.0",
+                "uuid": "u2",
+                "repository": f"/v1/repo/repositories/{u_high}",
+            },
+            {
+                "name": "foo",
+                "version": "1.5.0",
+                "uuid": "u3",
+                "repository": f"/v1/repo/repositories/{u_low}",
+            },
         ]
-        client = self._client(elements)
+        repositories = [
+            {"uuid": u_low, "priority": 10},
+            {"uuid": u_high, "priority": 4096},
+        ]
+        client = self._client(elements, repositories)
         patcher, select_mock = self._patch_select(elements[2])
         with patcher:
             selected = em_elements._select_element_by_name(client, "foo", None)
@@ -255,12 +276,53 @@ class TestSelectElementByName:
         offered = [c.value["version"] for c in select_mock.call_args.kwargs["choices"]]
         assert offered == ["2.0.0", "1.5.0", "1.0.0"]
 
-    def test_aborts_when_version_selection_is_cancelled(self) -> None:
+    def test_single_repository_selects_latest_without_asking(self) -> None:
+        """All versions live in one repository: take the latest, don't ask."""
+        u_repo = "11111111-1111-1111-1111-111111111111"
         elements = [
-            {"name": "foo", "version": "1.0.0", "uuid": "u1", "repository": ""},
-            {"name": "foo", "version": "2.0.0", "uuid": "u2", "repository": ""},
+            {
+                "name": "foo",
+                "version": "0.0.12",
+                "uuid": "u1",
+                "repository": f"/v1/repo/repositories/{u_repo}",
+            },
+            {
+                "name": "foo",
+                "version": "0.0.13",
+                "uuid": "u2",
+                "repository": f"/v1/repo/repositories/{u_repo}",
+            },
         ]
-        client = self._client(elements)
+        repositories = [{"uuid": u_repo, "priority": 10}]
+        client = self._client(elements, repositories)
+        patcher, select_mock = self._patch_select(elements[0])
+        with patcher:
+            selected = em_elements._select_element_by_name(client, "foo", None)
+        assert selected["uuid"] == "u2"
+        select_mock.assert_not_called()
+
+    def test_aborts_when_version_selection_is_cancelled(self) -> None:
+        u_low = "11111111-1111-1111-1111-111111111111"
+        u_high = "22222222-2222-2222-2222-222222222222"
+        elements = [
+            {
+                "name": "foo",
+                "version": "1.0.0",
+                "uuid": "u1",
+                "repository": f"/v1/repo/repositories/{u_low}",
+            },
+            {
+                "name": "foo",
+                "version": "2.0.0",
+                "uuid": "u2",
+                "repository": f"/v1/repo/repositories/{u_high}",
+            },
+        ]
+        repositories = [
+            {"uuid": u_low, "priority": 10},
+            {"uuid": u_high, "priority": 4096},
+        ]
+        client = self._client(elements, repositories)
         patcher, _ = self._patch_select(None)
         with patcher, pytest.raises(click.Abort):
             em_elements._select_element_by_name(client, "foo", None)

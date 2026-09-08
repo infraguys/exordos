@@ -202,8 +202,10 @@ def _select_element_by_name(
 
     Collects the element from every repository and filters out development
     versions unless version_filter is specified. When the remaining candidates
-    carry more than one version, the user is asked which version to take;
-    otherwise the candidate from the highest priority repository is returned.
+    carry more than one version and come from more than one repository, the
+    user is asked which version to take; otherwise the candidate from the
+    highest priority repository is returned, which for a single repository is
+    its latest version.
 
     Args:
         client: API client for making requests.
@@ -280,7 +282,11 @@ def _select_element_by_name(
     for element in elements:
         by_version.setdefault(element["version"], element)
 
-    if auto_select or len(by_version) == 1:
+    # Every candidate comes from the same repository: there is no repository
+    # priority to weigh against the version, so take the latest one.
+    single_repo = len({_get_repo_uuid(e) for e in elements}) == 1
+
+    if auto_select or single_repo or len(by_version) == 1:
         return elements[0]
 
     candidates = sorted(
