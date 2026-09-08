@@ -165,9 +165,7 @@ class TestDefaultHypervisorUuid:
         )
         run_mock.assert_called_once_with(["sudo", "cat", str(product_uuid_path)])
 
-    def test_falls_back_to_random_uuid_when_sudo_cat_also_fails(
-        self, tmp_path
-    ) -> None:
+    def test_falls_back_to_random_uuid_when_sudo_cat_also_fails(self, tmp_path) -> None:
         # A hardened system where even sudo can't read the file must fall
         # back too, rather than crashing the command.
         product_uuid_path = tmp_path / "product_uuid"

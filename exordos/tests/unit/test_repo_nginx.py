@@ -18,7 +18,11 @@
 import pathlib
 import threading
 
+import pytest
+import requests
+
 from exordos.builder import base as builder_base
+from exordos.repo import base
 from exordos.repo import nginx
 
 
@@ -74,3 +78,46 @@ class TestUploadArtifacts:
             "http://repo/elem/1.0.0/manifests/elem.yaml",
         ]
         assert len(threads) == 3
+
+
+def _response(status_code: int, method: str = "PUT") -> requests.Response:
+    response = requests.Response()
+    response.status_code = status_code
+    response.reason = "Conflict" if status_code == 409 else "Error"
+    response.url = "http://repo.example.com/elements/elem/1.0.0/images/foo.raw"
+    response.request = requests.Request(method=method, url=response.url).prepare()
+    return response
+
+
+class TestCheckResponse:
+    """Tests for NginxRepoDriver._check_response."""
+
+    def test__check_response_passes_on_success(self) -> None:
+        driver = nginx.NginxRepoDriver(url="http://repo.example.com")
+
+        assert driver._check_response(_response(201), "upload foo.raw") is None
+
+    def test__check_response_reports_readable_error_with_hint(self) -> None:
+        driver = nginx.NginxRepoDriver(url="http://repo.example.com")
+
+        with pytest.raises(base.RepoHTTPError) as exc_info:
+            driver._check_response(_response(409), "upload foo.raw")
+
+        message = str(exc_info.value)
+        assert exc_info.value.status_code == 409
+        assert "Failed to upload foo.raw" in message
+        assert "409 Conflict" in message
+        assert (
+            "PUT http://repo.example.com/elements/elem/1.0.0/images/foo.raw" in message
+        )
+        assert nginx.HTTP_ERROR_HINTS[409] in message
+        assert "<html>" not in message
+
+    def test__check_response_reports_error_without_hint(self) -> None:
+        driver = nginx.NginxRepoDriver(url="http://repo.example.com")
+
+        with pytest.raises(base.RepoHTTPError) as exc_info:
+            driver._check_response(_response(500), "upload foo.raw")
+
+        assert exc_info.value.status_code == 500
+        assert "Failed to upload foo.raw" in str(exc_info.value)

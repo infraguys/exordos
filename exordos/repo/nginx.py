@@ -31,6 +31,17 @@ from exordos.builder import base as builder_base
 from exordos.repo import base
 from exordos.repo.utils import get_published
 
+# Human readable explanations for the HTTP codes the repo server may return.
+HTTP_ERROR_HINTS = {
+    401: "authentication is required, check the repository credentials",
+    403: "access is denied, check the repository credentials and permissions",
+    404: "the path does not exist on the server",
+    405: "the server rejects the method",
+    409: "the parent directory does not exist or the directory is not empty",
+    413: "the file is too large for the server",
+    507: "the server has no free space left",
+}
+
 
 class NginxRepoDriver(base.AbstractRepoDriver):
     """Nginx-based repository driver for storing and retrieving elements.
@@ -72,6 +83,27 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         """Get the base path for elements in the repository."""
         return f"{self._base_url}/{c.ELEMENT_REPO_PATH}"
 
+    @staticmethod
+    def _check_response(response: requests.Response, action: str) -> None:
+        """Raise a readable error if the repo server rejected the request.
+
+        Args:
+            response: Response to check
+            action: What the driver was doing, e.g. 'upload icon.jpg'
+        """
+        if response.ok:
+            return
+
+        message = (
+            f"Failed to {action}: the repository server answered "
+            f"{response.status_code} {response.reason} for "
+            f"{response.request.method} {response.url}"
+        )
+        if hint := HTTP_ERROR_HINTS.get(response.status_code):
+            message = f"{message} ({hint})"
+
+        raise base.RepoHTTPError(message, status_code=response.status_code)
+
     def elements_inventory_path(self, element: builder_base.ElementInventory) -> str:
         """Get the base path for elements in the repository."""
         return (
@@ -94,7 +126,7 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         """
         with open(local_path, "rb") as f:
             response = self._session.put(remote_path, data=f)
-            response.raise_for_status()
+            self._check_response(response, f"upload {os.path.basename(local_path)}")
 
     def _upload_artifacts(
         self,
@@ -140,7 +172,7 @@ class NginxRepoDriver(base.AbstractRepoDriver):
             local_path: Path to save the downloaded file
         """
         response = self._session.get(remote_path)
-        response.raise_for_status()
+        self._check_response(response, f"download {os.path.basename(remote_path)}")
 
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         with open(local_path, "wb") as f:
@@ -155,7 +187,7 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         response = self._session.delete(remote_path)
         # Ignore 404 errors as the resource might not exist
         if response.status_code != 404:
-            response.raise_for_status()
+            self._check_response(response, f"delete {remote_path}")
 
     def _list_remote_directory(self, remote_path: str) -> list[str]:
         """List contents of a remote directory.
@@ -171,7 +203,7 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         response = self._session.get(remote_path)
         if response.status_code == 404:
             return []
-        response.raise_for_status()
+        self._check_response(response, f"list {remote_path}")
 
         # Simple parsing for Nginx autoindex HTML
         # This is a basic implementation - might need adjustment based
@@ -204,11 +236,13 @@ class NginxRepoDriver(base.AbstractRepoDriver):
 
         # Upload metadata file
         response = self._session.put(meta_url, data=meta_data.encode("utf-8"))
-        response.raise_for_status()
+        self._check_response(response, f"initialize repo at {self._base_url}")
 
         # Create elements directory
         response = self._session.put(f"{self.elements_path}/.keeper")
-        response.raise_for_status()
+        self._check_response(
+            response, f"create the elements directory at {self.elements_path}"
+        )
 
         self._logger.info(f"Initialized repo at {self._base_url}")
 
@@ -260,7 +294,9 @@ class NginxRepoDriver(base.AbstractRepoDriver):
             self.elements_inventory_path(element),
             data=json.dumps(spec, indent=2).encode("utf-8"),
         )
-        response.raise_for_status()
+        self._check_response(
+            response, f"upload the inventory of {element.name} {element.version}"
+        )
 
         self._logger.info(
             f"Pushed {element.name} version {element.version} "
@@ -283,7 +319,9 @@ class NginxRepoDriver(base.AbstractRepoDriver):
                 self.elements_inventory_path_latest(element),
                 data=json.dumps(spec, indent=2).encode("utf-8"),
             )
-            response.raise_for_status()
+            self._check_response(
+                response, f"upload the inventory of {element.name} latest"
+            )
 
             self._logger.info(
                 f"Pushed {element.name} version latest "
@@ -328,8 +366,8 @@ class NginxRepoDriver(base.AbstractRepoDriver):
                             f"Downloaded {artifact_name} from "
                             f"{element.name}/{element.version}"
                         )
-                    except requests.HTTPError as e:
-                        if e.response.status_code != 404:
+                    except base.RepoHTTPError as e:
+                        if e.status_code != 404:
                             raise
                         self._logger.warning(
                             f"File {artifact_name} not found in remote repository"
@@ -348,7 +386,9 @@ class NginxRepoDriver(base.AbstractRepoDriver):
         # Download inventory to get file list
         try:
             response = self._session.get(self.elements_inventory_path(element))
-            response.raise_for_status()
+            self._check_response(
+                response, f"read the inventory of {element.name} {element.version}"
+            )
 
             # Delete all artifact files
             for category in builder_base.ElementInventory.categories():
@@ -369,8 +409,8 @@ class NginxRepoDriver(base.AbstractRepoDriver):
             self._delete_remote(element_url)
 
             self._logger.info(f"Removed {element.name} version {element.version}")
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
+        except base.RepoHTTPError as e:
+            if e.status_code == 404:
                 self._logger.warning(
                     f"Element {element.name} version {element.version} not found"
                 )
@@ -400,7 +440,7 @@ class NginxRepoDriver(base.AbstractRepoDriver):
                     result[name] = versions
 
             return result
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
+        except base.RepoHTTPError as e:
+            if e.status_code == 404:
                 raise base.RepoNotFoundError(f"Repo at {self._base_url} not found.")
             raise

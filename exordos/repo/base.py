@@ -35,6 +35,14 @@ class ElementAlreadyExistsError(exceptions.ExordosException):
     """Element already exists in the repo."""
 
 
+class RepoHTTPError(exceptions.ExordosException):
+    """A request to the repo server failed."""
+
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class UnableLoadDriverError(exceptions.ExordosException):
     """Unable to load driver."""
 

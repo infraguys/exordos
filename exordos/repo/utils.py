@@ -20,6 +20,7 @@ import datetime
 import json
 import os
 import pathlib
+import sys
 import time
 import typing as tp
 import uuid as sys_uuid
@@ -158,7 +159,9 @@ def do_push(
         inventory: base_builder.ElementInventory,
     ) -> None:
         message = f"Push {inventory.name} to {repo_driver.name}..."
-        if workers > 1:
+        # The spinner draws nothing on a non-interactive output (CI logs),
+        # so the element being pushed is printed as a plain line there.
+        if workers > 1 or not sys.stdout.isatty():
             click.echo(message)
             repo_driver.push(inventory, latest=latest, workers=workers)
             return
