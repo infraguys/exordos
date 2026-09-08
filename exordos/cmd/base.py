@@ -65,6 +65,7 @@ def create_entity_group(
     entity_collection: str,
     fields_map: dict,
     group_name: str | None = None,
+    entity_plural: str | None = None,
     add_list_command: bool = True,
     add_show_command: bool = True,
     add_delete_command: bool = True,
@@ -76,12 +77,13 @@ def create_entity_group(
     no_auth: bool = False,
 ) -> ClickAliasedGroup:
     """Create a universal click group for entity management."""
+    entity_plural = entity_plural or f"{entity_name}s"
 
     @click.group(
-        group_name or f"{entity_name}s",
+        group_name or entity_plural,
         cls=ClickAliasedGroup,
         invoke_without_command=True,
-        help=f"Manage {entity_name}s in the Exordos installation",
+        help=f"Manage {entity_plural} in the Exordos installation",
     )
     @click.pass_context
     def entity_group(ctx: click.Context):
@@ -91,7 +93,7 @@ def create_entity_group(
     # List command
     if add_list_command:
 
-        @click.command("list", help=f"List {entity_name}s")
+        @click.command("list", help=f"List {entity_plural}")
         @click.option(
             "-f",
             "--filters",
@@ -120,7 +122,7 @@ def create_entity_group(
             "--watch",
             show_default=True,
             is_flag=True,
-            help=f"Watch the list of {entity_name}s",
+            help=f"Watch the list of {entity_plural}",
         )
         @click.option(
             "--interval",
@@ -257,7 +259,7 @@ def create_entity_group(
 
     if add_clear_command:
 
-        @click.command("clear", help=f"Delete all {entity_name}s")
+        @click.command("clear", help=f"Delete all {entity_plural}")
         @click.option(
             "--y", "-y", help="Automatically answer yes for all questions", is_flag=True
         )
